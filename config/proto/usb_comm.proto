@@ -184,4 +184,6 @@ message EinkImage
 	optional uint32 width = 6;
 	optional uint32 height = 7;
 	optional bool partial = 8;
+	// 添加字段标识是否为灰度图像
+	optional bool grayscale = 9;
 }

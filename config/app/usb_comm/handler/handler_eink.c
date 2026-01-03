@@ -25,13 +25,24 @@ static bool handle_eink_set_image(const usb_comm_MessageH2D *h2d, usb_comm_Messa
 
 	res->id = req->id;
 
-	bool partial = req->has_partial && req->partial;
-
-	if (req->has_x && req->has_y && req->has_width && req->has_height) {
-		eink_update_region(bytes, bytes_len, req->x, req->y, req->width, req->height,
-				   partial);
+	// 检查是否为灰度图像
+	if (req->has_grayscale && req->grayscale) {
+		// 如果是灰度图像，使用eink_update_grayscale函数
+		if (req->has_width && req->has_height) {
+			// bytes参数应该是原始灰度数据，每个像素1字节
+			eink_update_grayscale(bytes, req->width, req->height, 
+			                     req->has_partial ? req->partial : false);
+		}
 	} else {
-		eink_update(bytes, bytes_len, partial);
+		// 如果是二值图像，使用原有的处理逻辑
+		bool partial = req->has_partial && req->partial;
+
+		if (req->has_x && req->has_y && req->has_width && req->has_height) {
+			eink_update_region(bytes, bytes_len, req->x, req->y, req->width, req->height,
+					   partial);
+		} else {
+			eink_update(bytes, bytes_len, partial);
+		}
 	}
 
 	return true;

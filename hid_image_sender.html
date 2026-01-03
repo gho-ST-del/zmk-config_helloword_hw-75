@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HW-75 E-Ink 图片上传工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        .btn:hover {
+            background-color: #45a049;
+        }
+        
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .btn-danger {
+            background-color: #f44336;
+        }
+        
+        .btn-danger:hover {
+            background-color: #da190b;
+        }
+        
+        .btn-warning {
+            background-color: #ff9800;
+        }
+        
+        .btn-warning:hover {
+            background-color: #e68900;
+        }
+        
+        .preview-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        canvas {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            background-color: white;
+        }
+        
+        .hid-output {
+            height: 200px;
+            overflow-y: scroll;
+            background-color: #000;
+            color: #0f0;
+            padding: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            border-radius: 4px;
+        }
+        
+        .command-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .status-connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .debug-section {
+            margin-top: 20px;
+        }
+        
+        .debug-command {
+            margin: 5px 0;
+        }
+        
+        .debug-command button {
+            margin-left: 10px;
+        }
+        
+        .image-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+            align-items: center;
+        }
+        
+        input[type="range"] {
+            flex: 1;
+            min-width: 150px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HW-75 E-Ink 图片上传工具 (HID版)</h1>
+        
+        <div class="section">
+            <h2>HID设备连接</h2>
+            <div id="status" class="status status-disconnected">未连接</div>
+            <button id="connectBtn" class="btn">连接HID设备</button>
+            <button id="disconnectBtn" class="btn btn-danger" disabled>断开连接</button>
+        </div>
+        
+        <div class="section">
+            <h2>图片上传</h2>
+            <input type="file" id="imageInput" accept="image/*">
+            
+            <div class="image-controls">
+                <label>宽度: <input type="number" id="widthInput" value="296" min="1" max="296"></label>
+                <label>高度: <input type="number" id="heightInput" value="128" min="1" max="128"></label>
+                <label>阈值: <input type="number" id="thresholdInput" value="128" min="0" max="255"></label>
+            </div>
+            
+            <div class="image-controls">
+                <label>
+                    <input type="checkbox" id="grayscaleToggle"> 使用灰度模式（设备端抖动）
+                </label>
+            </div>
+            
+            <div class="preview-container">
+                <canvas id="previewCanvas"></canvas>
+            </div>
+            
+            <button id="sendImageBtn" class="btn" disabled>发送图片到E-Ink</button>
+        </div>
+        
+        <div class="section debug-section">
+            <h2>HID调试</h2>
+            <div class="hid-output" id="hidOutput"></div>
+            
+            <h3>预设调试命令</h3>
+            <div class="debug-command">
+                <button class="btn btn-warning" data-command="version">获取版本信息</button>
+                <button class="btn btn-warning" data-command="eink_status">获取E-Ink状态</button>
+                <button class="btn btn-warning" data-command="rgb_status">获取RGB状态</button>
+                <button class="btn btn-warning" data-command="knob_status">获取旋钮状态</button>
+            </div>
+            <div class="debug-command">
+                <button class="btn btn-warning" data-command="rgb_on">RGB开</button>
+                <button class="btn btn-warning" data-command="rgb_off">RGB关</button>
+                <button class="btn btn-warning" data-command="rgb_hui">RGB色相+</button>
+                <button class="btn btn-warning" data-command="rgb_hud">RGB色相-</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let device = null;
+        
+        // DOM元素
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusDiv = document.getElementById('status');
+        const imageInput = document.getElementById('imageInput');
+        const previewCanvas = document.getElementById('previewCanvas');
+        const sendImageBtn = document.getElementById('sendImageBtn');
+        const hidOutput = document.getElementById('hidOutput');
+        const widthInput = document.getElementById('widthInput');
+        const heightInput = document.getElementById('heightInput');
+        const thresholdInput = document.getElementById('thresholdInput');
+        
+        // 连接HID设备
+        connectBtn.addEventListener('click', async () => {
+            try {
+                // 请求访问HID设备
+                // 使用更通用的过滤器来匹配自定义HID设备
+                const devices = await navigator.hid.requestDevice({
+                    filters: [
+                        // 尝试匹配STM32设备
+                        { vendorId: 0x0483, productId: 0x572b }, // STM32 HID device
+                        // 通用STM32设备
+                        { vendorId: 0x0483 },
+                        // 其他可能的设备
+                        { usagePage: 0xff14 }, // 这是瀚文75在usb_comm_hid.c中定义的自定义HID页面
+                    ]
+                });
+                
+                if (!devices || devices.length === 0) {
+                    addHidOutput('未选择设备\n');
+                    return;
+                }
+                
+                device = devices[0];
+                
+                // 打开设备
+                await device.open();
+                
+                // 更新UI状态
+                statusDiv.textContent = `已连接: ${device.productName || '未知设备'}`;
+                statusDiv.className = 'status status-connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendImageBtn.disabled = false;
+                
+                // 添加接收HID输入报告的监听器
+                device.addEventListener('inputreport', handleInputReport);
+                
+                addHidOutput(`成功连接到设备: ${device.productName}\n`);
+                addHidOutput(`VID: 0x${device.vendorId.toString(16)}, PID: 0x${device.productId.toString(16)}\n`);
+                
+            } catch (error) {
+                console.error('连接HID设备失败:', error);
+                statusDiv.textContent = `连接失败: ${error.message}`;
+                statusDiv.className = 'status status-disconnected';
+                addHidOutput(`连接失败: ${error.message}\n`);
+            }
+        });
+        
+        // 断开HID设备
+        disconnectBtn.addEventListener('click', async () => {
+            if (device) {
+                await device.close();
+                device = null;
+            }
+            
+            statusDiv.textContent = '已断开连接';
+            statusDiv.className = 'status status-disconnected';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            sendImageBtn.disabled = true;
+            addHidOutput('已断开与设备的连接\n');
+        });
+        
+        // 处理HID输入报告
+        function handleInputReport(event) {
+            const reportId = event.reportId;
+            const data = event.data;
+            
+            // 解码输入报告
+            const decoder = new TextDecoder();
+            const text = decoder.decode(data);
+            
+            addHidOutput(`接收到报告 (ID: ${reportId}): ${text}\n`);
+        }
+        
+        // 图片选择和预览
+        imageInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = function(event) {
+                    const img = new Image();
+                    img.onload = function() {
+                        // 在canvas上绘制预览
+                        const canvas = previewCanvas;
+                        const ctx = canvas.getContext('2d');
+                        
+                        // 获取目标尺寸
+                        const targetWidth = parseInt(widthInput.value);
+                        const targetHeight = parseInt(heightInput.value);
+                        
+                        // 设置canvas尺寸
+                        canvas.width = targetWidth;
+                        canvas.height = targetHeight;
+                        
+                        // 计算居中位置
+                        const scale = Math.min(targetWidth / img.width, targetHeight / img.height);
+                        const newWidth = img.width * scale;
+                        const newHeight = img.height * scale;
+                        const x = (targetWidth - newWidth) / 2;
+                        const y = (targetHeight - newHeight) / 2;
+                        
+                        // 绘制并调整图片大小
+                        ctx.drawImage(img, x, y, newWidth, newHeight);
+                        
+                        // 转换为黑白（根据阈值）
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const data = imageData.data;
+                        
+                        // 实现Floyd-Steinberg抖动算法
+                        applyFloydSteinbergDithering(imageData, parseInt(thresholdInput.value));
+                        ctx.putImageData(imageData, 0, 0);
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Floyd-Steinberg抖动算法
+        function applyFloydSteinbergDithering(imageData, threshold) {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            
+            // 创建一个灰度值数组
+            const grayscale = new Array(width * height);
+            for (let i = 0; i < data.length; i += 4) {
+                // 计算灰度值 (使用加权平均)
+                const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                grayscale[i / 4] = gray;
+            }
+            
+            // Floyd-Steinberg抖动算法
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    const oldPixel = grayscale[idx];
+                    const newPixel = oldPixel > threshold ? 255 : 0;
+                    const error = oldPixel - newPixel;
+                    
+                    grayscale[idx] = newPixel;
+                    
+                    // 分配误差到相邻像素
+                    if (x + 1 < width) {
+                        grayscale[idx + 1] += error * 7/16;
+                    }
+                    if (y + 1 < height) {
+                        if (x > 0) {
+                            grayscale[idx + width - 1] += error * 3/16;
+                        }
+                        grayscale[idx + width] += error * 5/16;
+                        if (x + 1 < width) {
+                            grayscale[idx + width + 1] += error * 1/16;
+                        }
+                    }
+                }
+            }
+            
+            // 将处理后的灰度值写回imageData
+            for (let i = 0; i < data.length; i += 4) {
+                const gray = Math.max(0, Math.min(255, grayscale[i / 4]));
+                data[i] = gray;     // R
+                data[i + 1] = gray; // G
+                data[i + 2] = gray; // B
+            }
+        }
+        
+        // 当尺寸或阈值改变时更新预览
+        widthInput.addEventListener('change', () => {
+            if (imageInput.files.length > 0) {
+                imageInput.dispatchEvent(new Event('change'));
+            }
+        });
+        
+        heightInput.addEventListener('change', () => {
+            if (imageInput.files.length > 0) {
+                imageInput.dispatchEvent(new Event('change'));
+            }
+        });
+        
+        thresholdInput.addEventListener('change', () => {
+            if (imageInput.files.length > 0) {
+                imageInput.dispatchEvent(new Event('change'));
+            }
+        });
+        
+        // 发送图片到E-Ink
+        sendImageBtn.addEventListener('click', async () => {
+            if (!device || !previewCanvas.width || !previewCanvas.height) {
+                alert('请先连接设备并选择一张图片');
+                return;
+            }
+            
+            try {
+                // 从canvas获取图像数据
+                const ctx = previewCanvas.getContext('2d');
+                const imageData = ctx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+                
+                // 检查是否使用灰度模式
+                const useGrayscale = document.getElementById('grayscaleToggle') !== null ? 
+                                   document.getElementById('grayscaleToggle').checked : false;
+                
+                let msg;
+                if (useGrayscale) {
+                    // 使用灰度模式，发送原始灰度数据
+                    const grayscaleData = convertImageToGrayscale(imageData);
+                    msg = createEinkSetImageMessage(grayscaleData, previewCanvas.width, previewCanvas.height);
+                } else {
+                    // 使用1位模式，转换为1位图像数据
+                    const packedData = packImageTo1Bit(imageData);
+                    msg = createEinkSetImageMessage(packedData, previewCanvas.width, previewCanvas.height);
+                }
+                
+                // 发送消息
+                await sendHidReport(msg);
+                
+                addHidOutput('图片已发送到E-Ink屏幕\n');
+            } catch (error) {
+                console.error('发送图片失败:', error);
+                addHidOutput(`发送图片失败: ${error.message}\n`);
+            }
+        });
+        
+        // 将图像数据转换为灰度格式（每个像素1字节，8位灰度值）
+        function convertImageToGrayscale(imageData) {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            
+            // 创建灰度数据数组，每个像素1字节
+            const grayscaleData = new Uint8Array(width * height);
+            
+            for (let i = 0; i < width * height; i++) {
+                // 获取对应的RGBA值
+                const r = data[i * 4];
+                const g = data[i * 4 + 1];
+                const b = data[i * 4 + 2];
+                
+                // 使用加权平均法转换为灰度值
+                // 使用标准的灰度转换公式: 0.299*R + 0.587*G + 0.114*B
+                const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+                
+                grayscaleData[i] = gray;
+            }
+            
+            return grayscaleData;
+        }
+        
+        // 将图像数据打包为1位格式（保留原有函数用于兼容性）
+        function packImageTo1Bit(imageData) {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            
+            // 每个像素用1位表示，每8个像素打包成1个字节
+            const packedData = new Uint8Array(Math.ceil((width * height) / 8));
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    // 获取当前像素的索引（RGBA中的R通道）
+                    const pixelIndex = (y * width + x) * 4;
+                    // 获取灰度值（我们已经预处理为黑白）
+                    const gray = data[pixelIndex];
+                    
+                    // 计算在打包数据中的位置
+                    const bitPosition = y * width + x;
+                    const byteIndex = Math.floor(bitPosition / 8);
+                    const bitIndex = 7 - (bitPosition % 8); // MSB在前
+                    
+                    // 设置位 (白色为0，黑色为1)
+                    if (gray < 128) { // 黑色像素
+                        packedData[byteIndex] |= (1 << bitIndex);
+                    } // 白色像素不需要设置（默认为0）
+                }
+            }
+            
+            return packedData;
+        }
+        
+        // 创建E-Ink设置消息 (protobuf格式)
+        function createEinkSetImageMessage(imageData, width, height) {
+            // EINK_SET_IMAGE 消息的正确protobuf编码
+            // Action (7) 作为 varint，字段号 1，tag 为 0x08
+            // EinkImage 消息，字段号 5，tag 为 0x2a
+            
+            // 首先计算EinkImage子消息的内容
+            // 子消息包括 id(1), width(6), height(7), bits(3), grayscale(9)
+            let einkMsg = [];
+            
+            // 添加 id (varint, field 1, tag 0x08) - 默认为1
+            einkMsg.push(0x08, 0x01);
+            
+            // 添加 width (varint, field 6, tag 0x30)
+            einkMsg = einkMsg.concat(0x30); // tag
+            einkMsg = einkMsg.concat(encodeVarint(width));
+            
+            // 添加 height (varint, field 7, tag 0x38)
+            einkMsg = einkMsg.concat(0x38); // tag
+            einkMsg = einkMsg.concat(encodeVarint(height));
+            
+            // 添加 bits (bytes, field 3, tag 0x1a)
+            einkMsg = einkMsg.concat(0x1a); // tag
+            einkMsg = einkMsg.concat(encodeVarint(imageData.length)); // length
+            einkMsg = einkMsg.concat(Array.from(imageData)); // image data
+            
+            // 添加 grayscale 标志 (varint, field 9, tag 0x48)
+            // 表示这是灰度图像，需要在设备端使用抖动算法
+            einkMsg = einkMsg.concat(0x48); // tag
+            einkMsg = einkMsg.concat(0x01); // true (1字节布尔值)
+            
+            // 计算EinkImage子消息长度
+            const einkMsgLength = einkMsg.length;
+            
+            // 构建主消息
+            let message = [];
+            
+            // 添加 action (varint, field 1, tag 0x08)
+            message.push(0x08);
+            message = message.concat(encodeVarint(7)); // EINK_SET_IMAGE = 7
+            
+            // 添加 eink_image (embedded message, field 5, tag 0x2a)
+            message.push(0x2a); // tag
+            message = message.concat(encodeVarint(einkMsgLength)); // length of embedded message
+            message = message.concat(einkMsg); // embedded message
+            
+            return new Uint8Array(message);
+        }
+        
+        // 编码varint
+        function encodeVarint(value) {
+            if (value === 0) return [0];
+            
+            const bytes = [];
+            while (value > 0) {
+                let byte = value & 0x7f;
+                value >>= 7;
+                if (value > 0) {
+                    byte |= 0x80;
+                }
+                bytes.push(byte);
+            }
+            return bytes;
+        }
+        
+        // 发送HID输出报告 - 适配瀚文75的特殊协议
+        async function sendHidReport(data) {
+            if (!device) {
+                throw new Error('设备未连接');
+            }
+            
+            // 瀚文75的HID协议通过setReport发送数据，每个报告格式为：
+            // [REPORT_ID][LENGTH_BYTE][DATA...]
+            // 其中最大数据长度为62字节（64字节HID报告 - 1字节REPORT_ID - 1字节LENGTH）
+            const maxDataSize = 62;
+            const reportId = 1; // 使用报告ID 1（根据HID描述符定义）
+            
+            // 分块发送数据，每块前面加上长度字节
+            let position = 0;
+            while (position < data.length) {
+                // 计算当前块的大小
+                const remainingData = data.length - position;
+                const chunkSize = Math.min(maxDataSize, remainingData);
+                
+                // 创建报告数据，格式为 [REPORT_ID][LENGTH][DATA...]
+                const report = new Uint8Array(64); // HID报告大小为64字节
+                report[0] = reportId; // 报告ID
+                report[1] = chunkSize; // 数据长度
+                report.set(data.slice(position, position + chunkSize), 2); // 数据从第3个字节开始
+                
+                // 发送输出报告
+                try {
+                    // 使用正确的API发送报告，注意sendReport的参数
+                    // 第一个参数是reportId，第二个参数是实际要发送的数据
+                    // 由于我们构造的report已经包含了完整的64字节报告，所以直接发送
+                    await device.sendReport(reportId, report);
+                    addHidOutput(`发送报告: ${chunkSize} 字节\n`);
+                } catch (error) {
+                    console.error('发送报告失败:', error);
+                    addHidOutput(`发送报告失败: ${error.message}\n`);
+                    throw error;
+                }
+                
+                position += chunkSize;
+                
+                // 添加小延迟以避免发送过快
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+        }
+        
+        // 添加HID输出
+        function addHidOutput(text) {
+            hidOutput.textContent += text;
+            hidOutput.scrollTop = hidOutput.scrollHeight;
+        }
+        
+        // 检查浏览器是否支持WebHID API
+        if (!('hid' in navigator)) {
+            statusDiv.textContent = '错误: 此浏览器不支持Web HID API。请使用Chrome、Edge或其他支持该API的浏览器。';
+            statusDiv.className = 'status status-disconnected';
+            connectBtn.disabled = true;
+        } else {
+            addHidOutput('Web HID API 支持正常\n');
+        }
+    </script>
+</body>
+</html>
