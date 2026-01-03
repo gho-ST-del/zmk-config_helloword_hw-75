@@ -14,9 +14,9 @@ jobs:
       matrix:
         include:
           - { board: hw75_keyboard@1.1, keymap: hw75_keyboard.keymap  }
-          - { board: hw75_keyboard@1.2, keymap: hw75_keyboard.keymap  }
+          # - { board: hw75_keyboard@1.2, keymap: hw75_keyboard.keymap  }
           - { board: hw75_dynamic@A,    keymap: hw75_dynamic.keymap   }
-          - { board: hw75_dynamic@B,    keymap: hw75_dynamic.keymap   }
+          # - { board: hw75_dynamic@B,    keymap: hw75_dynamic.keymap   }
 
     steps:
       - name: Prepare variables
@@ -24,38 +24,50 @@ jobs:
           echo "zephyr_version=${ZEPHYR_VERSION}" >> $GITHUB_ENV
 
       - name: Checkout
-        uses: actions/checkout@v4  # 升级至 v4
+        uses: actions/checkout@v4
 
       - name: Set up build tools
         run: |
           apt-get update
+          apt-get install -y nodejs python3-venv
+          python3 -m venv venv
+          . venv/bin/activate
           apt-get install -y python3-pip protobuf-compiler curl
           curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
           apt-get install -y nodejs
-          pip install -U fonttools --break-system-packages
+          pip install -U fonttools
           npm install -g lv_font_conv
 
       - name: Cache west modules
-        uses: actions/cache@v4  # 升级至 v4 (解决报错)
+        uses: actions/cache@v4
+        continue-on-error: true
+        env:
+          cache_name: cache-zephyr-${{ env.zephyr_version }}-modules
         with:
           path: |
             modules/
             zephyr/
             zmk/
-          key: ${{ runner.os }}-build-${{ env.zephyr_version }}-${{ hashFiles('**/west.yml', '**/build.yaml') }}
+          key: ${{ runner.os }}-build-${{ env.cache_name }}-${{ hashFiles('**/west.yml', '**/build.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-build-${{ env.zephyr_version }}-
+            ${{ runner.os }}-build-${{ env.cache_name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
 
       - name: Prepare west
         run: |
+          . venv/bin/activate
           west init -l config
           west update
           west zephyr-export
-          pip install -r zephyr/scripts/requirements.txt --break-system-packages
+          pip install -r zephyr/scripts/requirements.txt
+          pip install protobuf==3.20.1  # 指定 protobuf 版本
+          pip install nanopb==0.4.6  # 安装指定版本的 nanopb
           git config --global --add safe.directory $PWD
 
       - name: West build
         run: |
+          . venv/bin/activate
           west build -s zmk/app -b ${{ matrix.board }} -- \
             -DZMK_CONFIG=${GITHUB_WORKSPACE}/config \
             -DKEYMAP_FILE=${GITHUB_WORKSPACE}/config/${{ matrix.keymap }}
@@ -64,7 +76,7 @@ jobs:
 
       - name: Rename artifacts
         run: |
-          mkdir -p build/artifacts  # 建议加上 -p 防止目录已存在报错
+          mkdir build/artifacts
           if [ -f build/zephyr/zmk.uf2 ]; then
             cp build/zephyr/zmk.uf2 "build/artifacts/${{ matrix.board }}-zmk.uf2"
           fi
@@ -74,26 +86,26 @@ jobs:
           cp build/zephyr/zmk.bin "build/artifacts/${{ matrix.board }}-zmk.bin"
 
       - name: Archive
-        uses: actions/upload-artifact@v4  # 升级至 v4 (解决报错)
+        uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.board }}  # 注意：v4 要求 matrix 循环中的 name 必须唯一
+          name: firmware-${{ matrix.board }}
           path: build/artifacts
 
   release:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: build
+
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4  # 升级至 v4
+        uses: actions/checkout@v4
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4  # 升级至 v4 (必须与 upload 版本匹配)
+        uses: actions/download-artifact@v4
         with:
+          name: firmware
           path: firmware
-          pattern: firmware-* # v4 匹配多个 matrix 产物的新写法
-          merge-multiple: true    # 将所有 matrix 的结果合并到同一个文件夹
 
       - name: Prepare release notes
         id: release
@@ -104,7 +116,7 @@ jobs:
           echo "$EOF" >> $GITHUB_OUTPUT
 
       - name: Publish release
-        uses: svenstaro/upload-release-action@v2
+        uses: svenstaro/upload-release-action@v4
         with:
           file: firmware/*
           file_glob: true

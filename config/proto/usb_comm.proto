@@ -26,12 +26,14 @@ enum Action {
 
 message MessageH2D
 {
+	option (nanopb_msgopt).submsg_callback = true;
+
 	required Action action = 1;
 	oneof payload
 	{
 		Nop nop = 2;
-		KnobConfig knob_config = 3 [(nanopb).submsg_callback = true];
-		KnobConfig.Pref knob_pref = 6 [(nanopb).submsg_callback = true];
+		KnobConfig knob_config = 3;
+		KnobConfig.Pref knob_pref = 6;
 		RgbControl rgb_control = 4;
 		RgbState rgb_state = 7;
 		RgbIndicator rgb_indicator = 8;
@@ -45,10 +47,10 @@ message MessageD2H
 	oneof payload
 	{
 		Nop nop = 2;
-		Version version = 3 [(nanopb).submsg_callback = true];
+		Version version = 3;
 		MotorState motor_state = 4;
-		KnobConfig knob_config = 5 [(nanopb).submsg_callback = true];
-		KnobConfig.Pref knob_pref = 8 [(nanopb).submsg_callback = true];
+		KnobConfig knob_config = 5;
+		KnobConfig.Pref knob_pref = 8;
 		RgbState rgb_state = 6;
 		RgbIndicator rgb_indicator = 9;
 		EinkImage eink_image = 7;
