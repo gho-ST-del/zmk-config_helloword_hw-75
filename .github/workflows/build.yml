@@ -24,7 +24,7 @@ jobs:
           echo "zephyr_version=${ZEPHYR_VERSION}" >> $GITHUB_ENV
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # 升级至 v4
 
       - name: Set up build tools
         run: |
@@ -36,20 +36,15 @@ jobs:
           npm install -g lv_font_conv
 
       - name: Cache west modules
-        uses: actions/cache@v3.0.11
-        continue-on-error: true
-        env:
-          cache_name: cache-zephyr-${{ env.zephyr_version }}-modules
+        uses: actions/cache@v4  # 升级至 v4 (解决报错)
         with:
           path: |
             modules/
             zephyr/
             zmk/
-          key: ${{ runner.os }}-build-${{ env.cache_name }}-${{ hashFiles('**/west.yml', '**/build.yaml') }}
+          key: ${{ runner.os }}-build-${{ env.zephyr_version }}-${{ hashFiles('**/west.yml', '**/build.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache_name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
+            ${{ runner.os }}-build-${{ env.zephyr_version }}-
 
       - name: Prepare west
         run: |
@@ -69,7 +64,7 @@ jobs:
 
       - name: Rename artifacts
         run: |
-          mkdir build/artifacts
+          mkdir -p build/artifacts  # 建议加上 -p 防止目录已存在报错
           if [ -f build/zephyr/zmk.uf2 ]; then
             cp build/zephyr/zmk.uf2 "build/artifacts/${{ matrix.board }}-zmk.uf2"
           fi
@@ -79,26 +74,26 @@ jobs:
           cp build/zephyr/zmk.bin "build/artifacts/${{ matrix.board }}-zmk.bin"
 
       - name: Archive
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # 升级至 v4 (解决报错)
         with:
-          name: firmware
+          name: firmware-${{ matrix.board }}  # 注意：v4 要求 matrix 循环中的 name 必须唯一
           path: build/artifacts
 
   release:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: build
-
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # 升级至 v4
 
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4  # 升级至 v4 (必须与 upload 版本匹配)
         with:
-          name: firmware
           path: firmware
+          pattern: firmware-* # v4 匹配多个 matrix 产物的新写法
+          merge-multiple: true    # 将所有 matrix 的结果合并到同一个文件夹
 
       - name: Prepare release notes
         id: release
