@@ -18,7 +18,9 @@ if(CONFIG_HW75_PROTO_UART_COMM)
     list(APPEND PROTO_DEFS uart_comm.proto)
 endif()
 
-nanopb_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_DEFS})
+# 设置nanopb选项以处理兼容性问题
+set(NANOPB_OPTIONS "--no-timestamp")
+nanopb_generate_cpp(PROTO_SRCS PROTO_HDRS ${NANOPB_OPTIONS} ${PROTO_DEFS})
 zephyr_library_sources(${PROTO_SRCS} ${PROTO_HDRS})
 
 zephyr_include_directories(${NANOPB_INCLUDE_DIRS})
