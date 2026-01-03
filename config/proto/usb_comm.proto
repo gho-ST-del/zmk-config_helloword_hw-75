@@ -26,8 +26,6 @@ enum Action {
 
 message MessageH2D
 {
-	option (nanopb_msgopt).submsg_callback = true;
-
 	required Action action = 1;
 	oneof payload
 	{
@@ -76,6 +74,8 @@ message Version
 		optional bool eink = 2;
 		optional bool knob = 3;
 		optional bool knob_prefs = 4;
+		optional bool knob_profile_switch = 7;
+		optional bool knob_spring_report = 8;
 	}
 }
 
@@ -110,6 +110,7 @@ message KnobConfig
 		DAMPED = 4;
 		SPIN = 5;
 		RATCHET = 6;
+		SWITCH = 7;
 	}
 
 	message Pref
