@@ -140,6 +140,24 @@
             flex: 1;
             min-width: 150px;
         }
+        
+        /* 新增：屏幕方向选择样式 */
+        .orientation-selector {
+            margin: 10px 0;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .orientation-btn {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        .orientation-btn.active {
+            background-color: #007bff;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -156,6 +174,12 @@
         <div class="section">
             <h2>图片上传</h2>
             <input type="file" id="imageInput" accept="image/*">
+            
+            <!-- 新增：屏幕方向选择 -->
+            <div class="orientation-selector">
+                <button id="landscapeBtn" class="orientation-btn active">横屏 (296x128)</button>
+                <button id="portraitBtn" class="orientation-btn">竖屏 (128x296)</button>
+            </div>
             
             <div class="image-controls">
                 <label>宽度: <input type="number" id="widthInput" value="296" min="1" max="296"></label>
@@ -182,7 +206,7 @@
             
             <h3>预设调试命令</h3>
             <div class="debug-command">
-                <button class="btn btn-warning" data-command="version">获取版本信息</button>
+                <button id="queryVersionBtn" class="btn btn-warning">获取版本信息</button>
                 <button class="btn btn-warning" data-command="eink_status">获取E-Ink状态</button>
                 <button class="btn btn-warning" data-command="rgb_status">获取RGB状态</button>
                 <button class="btn btn-warning" data-command="knob_status">获取旋钮状态</button>
@@ -199,6 +223,7 @@
     <script>
         // 全局变量
         let device = null;
+        let currentOrientation = 'landscape'; // 默认横屏
         
         // DOM元素
         const connectBtn = document.getElementById('connectBtn');
@@ -211,6 +236,42 @@
         const widthInput = document.getElementById('widthInput');
         const heightInput = document.getElementById('heightInput');
         const thresholdInput = document.getElementById('thresholdInput');
+        const grayscaleToggle = document.getElementById('grayscaleToggle');
+        const landscapeBtn = document.getElementById('landscapeBtn');
+        const portraitBtn = document.getElementById('portraitBtn');
+        
+        // 屏幕方向切换事件
+        landscapeBtn.addEventListener('click', () => {
+            setOrientation('landscape');
+        });
+        
+        portraitBtn.addEventListener('click', () => {
+            setOrientation('portrait');
+        });
+        
+        function setOrientation(orientation) {
+            currentOrientation = orientation;
+            
+            // 更新按钮状态
+            landscapeBtn.classList.toggle('active', orientation === 'landscape');
+            portraitBtn.classList.toggle('active', orientation === 'portrait');
+            
+            // 设置正确的尺寸
+            if (orientation === 'landscape') {
+                widthInput.value = 296;
+                heightInput.value = 128;
+            } else {
+                widthInput.value = 128;
+                heightInput.value = 296;
+            }
+            
+            // 如果已有图片，重新触发预览更新
+            if (imageInput.files.length > 0) {
+                imageInput.dispatchEvent(new Event('change'));
+            }
+            
+            addHidOutput(`已切换到${orientation === 'landscape' ? '横屏' : '竖屏'}模式\n`);
+        }
         
         // 连接HID设备
         connectBtn.addEventListener('click', async () => {
@@ -279,11 +340,68 @@
             const reportId = event.reportId;
             const data = event.data;
             
-            // 解码输入报告
+            // 尝试解码为protobuf消息
+            try {
+                // 检查是否为版本响应消息
+                // 版本响应消息的action字段应为1（VERSION），tag为0x08
+                if (data.byteLength > 0 && data.getUint8(0) === 0x08) {
+                    // 这可能是protobuf编码的消息
+                    // 解析action字段
+                    let offset = 1;
+                    const action = decodeVarintFromBuffer(data, offset);
+                    offset += getVarintSize(action);
+                    
+                    // 如果是版本响应（action=1）
+                    if (action === 1) {
+                        // 这是一个版本响应消息，尝试解析
+                        // 实际上我们需要解析完整的MessageD2H结构
+                        // 但由于复杂性，我们直接显示原始数据
+                        addHidOutput(`接收到版本响应 (ID: ${reportId})\n`);
+                        
+                        // 提取版本信息的简单方式是检查数据中的字符串
+                        // 这里我们只显示原始数据，实际解析需要完整的protobuf解码器
+                        addHidOutput(`版本信息原始数据: ${Array.from(new Uint8Array(data.buffer, data.byteOffset, data.byteLength)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}\n`);
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.log("无法解析protobuf消息，使用原始文本显示");
+            }
+            
+            // 如果不是protobuf消息或解析失败，使用原始文本解码
             const decoder = new TextDecoder();
             const text = decoder.decode(data);
             
             addHidOutput(`接收到报告 (ID: ${reportId}): ${text}\n`);
+        }
+        
+        // 辅助函数：从缓冲区解码varint
+        function decodeVarintFromBuffer(buffer, offset) {
+            let result = 0;
+            let shift = 0;
+            let currentOffset = offset;
+            
+            while (currentOffset < buffer.byteLength) {
+                const byte = buffer.getUint8(currentOffset);
+                currentOffset++;
+                
+                result |= (byte & 0x7F) << shift;
+                if ((byte & 0x80) === 0) {
+                    break;
+                }
+                shift += 7;
+            }
+            
+            return result;
+        }
+        
+        // 辅助函数：获取varint占用的字节数
+        function getVarintSize(value) {
+            if (value < 0x80) return 1;
+            if (value < 0x4000) return 2;
+            if (value < 0x200000) return 3;
+            if (value < 0x10000000) return 4;
+            return 5;
         }
         
         // 图片选择和预览
@@ -412,22 +530,30 @@
                 const imageData = ctx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
                 
                 // 检查是否使用灰度模式
-                const useGrayscale = document.getElementById('grayscaleToggle') !== null ? 
-                                   document.getElementById('grayscaleToggle').checked : false;
+                const useGrayscale = grayscaleToggle !== null ? 
+                                   grayscaleToggle.checked : false;
                 
-                let msg;
                 if (useGrayscale) {
                     // 使用灰度模式，发送原始灰度数据
                     const grayscaleData = convertImageToGrayscale(imageData);
-                    msg = createEinkSetImageMessage(grayscaleData, previewCanvas.width, previewCanvas.height);
+                    console.log(`发送灰度图像数据: ${grayscaleData.length} 字节, 尺寸: ${previewCanvas.width}x${previewCanvas.height}`);
+                    await sendEinkImageWithGrayscale(grayscaleData, previewCanvas.width, previewCanvas.height, false); // 强制使用完整刷新
                 } else {
                     // 使用1位模式，转换为1位图像数据
                     const packedData = packImageTo1Bit(imageData);
-                    msg = createEinkSetImageMessage(packedData, previewCanvas.width, previewCanvas.height);
+                    console.log(`发送1位图像数据: ${packedData.length} 字节, 尺寸: ${previewCanvas.width}x${previewCanvas.height}, 预期长度: ${Math.ceil(previewCanvas.width * previewCanvas.height / 8)}`);
+                    
+                    // 检查是否符合设备端验证要求
+                    const expectedLen = previewCanvas.width * previewCanvas.height / 8;
+                    if (packedData.length === expectedLen) {
+                        // 直接发送完整图像
+                        await sendEinkImage(packedData, previewCanvas.width, previewCanvas.height, false);
+                    } else {
+                        console.error(`图像数据长度不匹配: 实际=${packedData.length}, 期望=${expectedLen}`);
+                        addHidOutput(`图像数据长度不匹配: 实际=${packedData.length}, 期望=${expectedLen}\n`);
+                        return;
+                    }
                 }
-                
-                // 发送消息
-                await sendHidReport(msg);
                 
                 addHidOutput('图片已发送到E-Ink屏幕\n');
             } catch (error) {
@@ -435,6 +561,185 @@
                 addHidOutput(`发送图片失败: ${error.message}\n`);
             }
         });
+        
+        // 发送E-Ink图像数据（二值化）
+        async function sendEinkImage(imageData, width, height, partial = false) {
+            // 构建protobuf消息，完全按照Python成功实现的结构
+            let message = [];
+            
+            // Action (varint, field 1, tag 0x08)
+            message.push(0x08);
+            message = message.concat(encodeVarint(7)); // EINK_SET_IMAGE = 7
+            
+            // Payload (embedded message, field 5, tag 0x2a) - 这是eink_image字段
+            message.push(0x2a);
+            
+            // 准备嵌入消息内容
+            let embeddedMsg = [];
+            
+            // ID (varint, field 1, tag 0x08) - Python使用随机数
+            embeddedMsg.push(0x08);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(Math.floor(Math.random() * 1000000)));
+            
+            // X, Y, Width, Height - 总是设置这些值，与Python一致
+            embeddedMsg.push(0x20); // X (varint, field 4, tag 0x20)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(0));
+            
+            embeddedMsg.push(0x28); // Y (varint, field 5, tag 0x28)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(0));
+            
+            embeddedMsg.push(0x30); // Width (varint, field 6, tag 0x30)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(width));
+            
+            embeddedMsg.push(0x38); // Height (varint, field 7, tag 0x38)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(height));
+            
+            // Partial (bool, field 8, tag 0x40)
+            embeddedMsg.push(0x40);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(partial ? 1 : 0));
+            
+            // Bits (bytes, field 3, tag 0x1a) - 直接设置图像数据，与Python完全一致
+            embeddedMsg.push(0x1a);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(imageData.length)); // Length of bytes
+            for (let i = 0; i < imageData.length; i++) {
+                embeddedMsg.push(imageData[i]);
+            }
+            
+            // 添加嵌入消息的长度（protobuf length-delimited）
+            message = message.concat(encodeVarint(embeddedMsg.length));
+            message = message.concat(embeddedMsg);
+            
+            console.log(`完整protobuf消息长度: ${message.length} 字节`);
+            
+            // 将消息发送到HID报告
+            // 设备端期望格式: [REPORT_ID][LENGTH][DATA...]
+            const maxDataSize = 62; // 设备端实际数据容量
+            let position = 0;
+            
+            while (position < message.length) {
+                // 计算当前块的大小
+                const remainingData = message.length - position;
+                const chunkSize = Math.min(maxDataSize, remainingData);
+                
+                // 创建HID报告
+                const report = new Uint8Array(64); // 总共64字节
+                report[0] = 0x01; // Report ID (HID_COMM_REPORT_ID)
+                
+                // 第二个字节是数据长度
+                report[1] = chunkSize;
+                
+                // 复制数据
+                for (let i = 0; i < chunkSize; i++) {
+                    report[2 + i] = message[position + i];
+                }
+                
+                // 发送报告
+                await sendHidReport(report);
+                
+                position += chunkSize;
+            }
+            
+            addHidOutput(`发送图像数据完成: ${message.length} 字节\n`);
+        }
+        
+        // 发送E-Ink图像数据（灰度）
+        async function sendEinkImageWithGrayscale(imageData, width, height, partial = false) {
+            // 构建protobuf消息
+            let message = [];
+            
+            // Action (varint, field 1, tag 0x08)
+            message.push(0x08);
+            message = message.concat(encodeVarint(7)); // EINK_SET_IMAGE = 7
+            
+            // Payload (embedded message, field 5, tag 0x2a)
+            message.push(0x2a);
+            
+            // 准备嵌入消息内容
+            let embeddedMsg = [];
+            
+            // ID (varint, field 1, tag 0x08) - Python使用随机数
+            embeddedMsg.push(0x08);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(Math.floor(Math.random() * 1000000)));
+            
+            // X, Y, Width, Height - 总是设置这些值
+            embeddedMsg.push(0x20); // X (varint, field 4, tag 0x20)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(0));
+            
+            embeddedMsg.push(0x28); // Y (varint, field 5, tag 0x28)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(0));
+            
+            embeddedMsg.push(0x30); // Width (varint, field 6, tag 0x30)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(width));
+            
+            embeddedMsg.push(0x38); // Height (varint, field 7, tag 0x38)
+            embeddedMsg = embeddedMsg.concat(encodeVarint(height));
+            
+            // Partial (bool, field 8, tag 0x40)
+            embeddedMsg.push(0x40);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(partial ? 1 : 0));
+            
+            // Grayscale (bool, field 9, tag 0x48) - 标记为灰度图像
+            embeddedMsg.push(0x48);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(1));
+            
+            // Bits (bytes, field 3, tag 0x1a) - 直接设置图像数据
+            embeddedMsg.push(0x1a);
+            embeddedMsg = embeddedMsg.concat(encodeVarint(imageData.length)); // Length of bytes
+            for (let i = 0; i < imageData.length; i++) {
+                embeddedMsg.push(imageData[i]);
+            }
+            
+            // 添加嵌入消息的长度
+            message = message.concat(encodeVarint(embeddedMsg.length));
+            message = message.concat(embeddedMsg);
+            
+            console.log(`完整protobuf消息长度: ${message.length} 字节`);
+            
+            // 将消息发送到HID报告
+            const maxDataSize = 62; // 设备端实际数据容量
+            let position = 0;
+            
+            while (position < message.length) {
+                // 计算当前块的大小
+                const remainingData = message.length - position;
+                const chunkSize = Math.min(maxDataSize, remainingData);
+                
+                // 创建HID报告
+                const report = new Uint8Array(64); // 总共64字节
+                report[0] = 0x01; // Report ID (HID_COMM_REPORT_ID)
+                
+                // 第二个字节是数据长度
+                report[1] = chunkSize;
+                
+                // 复制数据
+                for (let i = 0; i < chunkSize; i++) {
+                    report[2 + i] = message[position + i];
+                }
+                
+                // 发送报告
+                await sendHidReport(report);
+                
+                position += chunkSize;
+            }
+            
+            addHidOutput(`发送灰度图像数据完成: ${message.length} 字节\n`);
+        }
+        
+        // 编码varint
+        function encodeVarint(value) {
+            if (value === 0) return [0];
+            
+            const bytes = [];
+            while (value > 0) {
+                let byte = value & 0x7f;
+                value >>= 7;
+                if (value > 0) {
+                    byte |= 0x80;
+                }
+                bytes.push(byte);
+            }
+            return bytes;
+        }
         
         // 将图像数据转换为灰度格式（每个像素1字节，8位灰度值）
         function convertImageToGrayscale(imageData) {
@@ -468,7 +773,7 @@
             const height = imageData.height;
             
             // 每个像素用1位表示，每8个像素打包成1个字节
-            const packedData = new Uint8Array(Math.ceil((width * height) / 8));
+            const packedData = new Uint8Array(Math.ceil(width * height / 8));
             
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
@@ -492,114 +797,57 @@
             return packedData;
         }
         
-        // 创建E-Ink设置消息 (protobuf格式)
-        function createEinkSetImageMessage(imageData, width, height) {
-            // EINK_SET_IMAGE 消息的正确protobuf编码
-            // Action (7) 作为 varint，字段号 1，tag 为 0x08
-            // EinkImage 消息，字段号 5，tag 为 0x2a
+        
+        // 创建版本查询消息
+        function createVersionQueryMessage() {
+            // VERSION 消息的正确protobuf编码
+            // Action (1) 作为 varint，字段号 1，tag 为 0x08
             
-            // 首先计算EinkImage子消息的内容
-            // 子消息包括 id(1), width(6), height(7), bits(3), grayscale(9)
-            let einkMsg = [];
-            
-            // 添加 id (varint, field 1, tag 0x08) - 默认为1
-            einkMsg.push(0x08, 0x01);
-            
-            // 添加 width (varint, field 6, tag 0x30)
-            einkMsg = einkMsg.concat(0x30); // tag
-            einkMsg = einkMsg.concat(encodeVarint(width));
-            
-            // 添加 height (varint, field 7, tag 0x38)
-            einkMsg = einkMsg.concat(0x38); // tag
-            einkMsg = einkMsg.concat(encodeVarint(height));
-            
-            // 添加 bits (bytes, field 3, tag 0x1a)
-            einkMsg = einkMsg.concat(0x1a); // tag
-            einkMsg = einkMsg.concat(encodeVarint(imageData.length)); // length
-            einkMsg = einkMsg.concat(Array.from(imageData)); // image data
-            
-            // 添加 grayscale 标志 (varint, field 9, tag 0x48)
-            // 表示这是灰度图像，需要在设备端使用抖动算法
-            einkMsg = einkMsg.concat(0x48); // tag
-            einkMsg = einkMsg.concat(0x01); // true (1字节布尔值)
-            
-            // 计算EinkImage子消息长度
-            const einkMsgLength = einkMsg.length;
-            
-            // 构建主消息
             let message = [];
             
             // 添加 action (varint, field 1, tag 0x08)
             message.push(0x08);
-            message = message.concat(encodeVarint(7)); // EINK_SET_IMAGE = 7
-            
-            // 添加 eink_image (embedded message, field 5, tag 0x2a)
-            message.push(0x2a); // tag
-            message = message.concat(encodeVarint(einkMsgLength)); // length of embedded message
-            message = message.concat(einkMsg); // embedded message
+            message = message.concat(encodeVarint(1)); // VERSION = 1
             
             return new Uint8Array(message);
         }
         
-        // 编码varint
-        function encodeVarint(value) {
-            if (value === 0) return [0];
-            
-            const bytes = [];
-            while (value > 0) {
-                let byte = value & 0x7f;
-                value >>= 7;
-                if (value > 0) {
-                    byte |= 0x80;
-                }
-                bytes.push(byte);
+        // 查询设备版本信息
+        async function queryVersion() {
+            if (!device) {
+                alert('请先连接设备');
+                return;
             }
-            return bytes;
+            
+            try {
+                const msg = createVersionQueryMessage();
+                
+                // 发送消息
+                await sendHidReport(msg);
+                
+                addHidOutput('版本查询请求已发送\n');
+            } catch (error) {
+                console.error('查询版本失败:', error);
+                addHidOutput(`查询版本失败: ${error.message}\n`);
+            }
         }
         
-        // 发送HID输出报告 - 适配瀚文75的特殊协议
-        async function sendHidReport(data) {
+        // 为版本查询按钮添加事件监听器
+        const queryVersionBtn = document.getElementById('queryVersionBtn');
+        if (queryVersionBtn) {
+            queryVersionBtn.addEventListener('click', queryVersion);
+        }
+        
+        // 发送HID报告
+        async function sendHidReport(report) {
             if (!device) {
-                throw new Error('设备未连接');
+                throw new Error('No device connected');
             }
             
-            // 瀚文75的HID协议通过setReport发送数据，每个报告格式为：
-            // [REPORT_ID][LENGTH_BYTE][DATA...]
-            // 其中最大数据长度为62字节（64字节HID报告 - 1字节REPORT_ID - 1字节LENGTH）
-            const maxDataSize = 62;
-            const reportId = 1; // 使用报告ID 1（根据HID描述符定义）
+            // 发送输出报告
+            await device.sendReport(report[0], report.slice(1));
             
-            // 分块发送数据，每块前面加上长度字节
-            let position = 0;
-            while (position < data.length) {
-                // 计算当前块的大小
-                const remainingData = data.length - position;
-                const chunkSize = Math.min(maxDataSize, remainingData);
-                
-                // 创建报告数据，格式为 [REPORT_ID][LENGTH][DATA...]
-                const report = new Uint8Array(64); // HID报告大小为64字节
-                report[0] = reportId; // 报告ID
-                report[1] = chunkSize; // 数据长度
-                report.set(data.slice(position, position + chunkSize), 2); // 数据从第3个字节开始
-                
-                // 发送输出报告
-                try {
-                    // 使用正确的API发送报告，注意sendReport的参数
-                    // 第一个参数是reportId，第二个参数是实际要发送的数据
-                    // 由于我们构造的report已经包含了完整的64字节报告，所以直接发送
-                    await device.sendReport(reportId, report);
-                    addHidOutput(`发送报告: ${chunkSize} 字节\n`);
-                } catch (error) {
-                    console.error('发送报告失败:', error);
-                    addHidOutput(`发送报告失败: ${error.message}\n`);
-                    throw error;
-                }
-                
-                position += chunkSize;
-                
-                // 添加小延迟以避免发送过快
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
+            addHidOutput(`发送报告: ${report.length - 1} 字节\n`);
         }
         
         // 添加HID输出
